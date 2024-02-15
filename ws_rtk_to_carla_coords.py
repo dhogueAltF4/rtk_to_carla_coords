@@ -1,4 +1,6 @@
 import socketio
+from datetime import datetime, timedelta
+import pytz
 
 import os
 from dotenv import load_dotenv
@@ -115,10 +117,26 @@ def on_connect():
 
 @sio.on("behaviorstate", namespace=rosnamespace)
 def on_channel(data):
-    converted_coordinates = convert_lat_long_to_x_y(data["message"])
-    print(
-        f"Plotting Point: x: {converted_coordinates[0]}, y: {converted_coordinates[1]}, z: {converted_coordinates[2]}"
+    current_time = datetime.now()
+    local_timezone = pytz.timezone("America/New_York")
+
+    utc_time = local_timezone.localize(current_time).astimezone(pytz.utc)
+    utc_time = utc_time.time()
+
+    target_datetime = datetime.strptime(data["message"]["Time"], "%H:%M:%S.%f").time()
+
+    latency = timedelta(
+        hours=utc_time.hour - target_datetime.hour,
+        minutes=utc_time.minute - target_datetime.minute,
+        seconds=utc_time.second - target_datetime.second,
+        microseconds=utc_time.microsecond - target_datetime.microsecond,
     )
+
+    latency_ms = int(latency.total_seconds() * 1000)
+
+    print("Latency:", f"{latency_ms}ms")
+    print("================================================")
+    converted_coordinates = convert_lat_long_to_x_y(data["message"])
     control = carla.VehicleControl()
     control.brake = 1.0
     carla_vehicle.apply_control(control)
