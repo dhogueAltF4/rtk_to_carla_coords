@@ -1,12 +1,24 @@
 import socketio
 from datetime import datetime, timedelta
 import pytz
+import logging
 
 import os
 from dotenv import load_dotenv
 import math
 
 import carla
+
+
+class Log_Colors:
+    RESET = "\033[0m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+
 
 load_dotenv()
 token = os.getenv("ATTRIUM_API_KEY")
@@ -77,6 +89,18 @@ def is_float(s):
         return False
 
 
+def compare_timestamps(timestamp1, timestamp2, threshold_ms=1000):
+    dt_format = "%H:%M:%S.%f"
+    dt1 = datetime.strptime(timestamp1, dt_format)
+    dt2 = datetime.strptime(timestamp2, dt_format)
+
+    # Calculate the time difference in milliseconds
+    time_difference_ms = abs((dt2 - dt1).total_seconds() * 1000)
+
+    # Compare with the threshold and return True if the difference is more than 10 ms
+    return time_difference_ms > threshold_ms
+
+
 def convert_lat_long_to_x_y(data):
     converted_data = lat_lon_to_meters_from_origin(
         float(data["Lat"]), float(data["Long"])
@@ -115,8 +139,19 @@ def on_connect():
     print(f"Joined room: {room_name}")
 
 
+prev_time = None
+
+
 @sio.on("behaviorstate", namespace=rosnamespace)
 def on_channel(data):
+    logging.basicConfig(
+        filename="rtk_test_logs_02_16_2024.log",
+        filemode="a",
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+
+    logging.info(f"RTK STREAM: [{data['message']}]")
     current_time = datetime.now()
     local_timezone = pytz.timezone("America/New_York")
 
@@ -133,8 +168,43 @@ def on_channel(data):
     )
 
     latency_ms = int(latency.total_seconds() * 1000)
+    current_rtk_time = data["message"]["Time"]
+    global prev_time
 
-    print("Latency:", f"{latency_ms}ms")
+    if prev_time is None:
+        prev_time = current_rtk_time
+    if compare_timestamps(current_rtk_time, prev_time):
+        # print(
+        #     Log_Colors.RED,
+        #     "============RTK_TIME HICCUP============",
+        #     Log_Colors.RESET,
+        # )
+        # print(
+        #     Log_Colors.RED,
+        #     "START:",
+        #     prev_time,
+        #     "FINISH:",
+        #     current_rtk_time,
+        #     Log_Colors.RESET,
+        # )
+        # print(
+        #     Log_Colors.RED,
+        #     "=======================================",
+        #     Log_Colors.RESET,
+        # )
+
+        # # Configure the logging module to append to an existing log file
+
+        current_rtk_time = data["message"]["Time"]
+
+        logging.warning(
+            f"RTK Hiccup ==> [START: {prev_time}, FINSH: {current_rtk_time}]"
+        )
+        prev_time = current_rtk_time
+    if latency_ms <= 250:
+        print(Log_Colors.GREEN, "Latency:", f"{latency_ms}ms", Log_Colors.RESET)
+    else:
+        print(Log_Colors.RED, "Latency:", f"{latency_ms}ms", Log_Colors.RESET)
     print("================================================")
     converted_coordinates = convert_lat_long_to_x_y(data["message"])
     control = carla.VehicleControl()
@@ -157,8 +227,9 @@ def on_channel(data):
             converted_coordinates[0],
             converted_coordinates[1],
             converted_coordinates[2],
-        ),
-        blue,
+        )
+        - carla.Location(z=1),
+        red,
     )
 
 
